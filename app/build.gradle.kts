@@ -107,11 +107,6 @@ android {
 
     flavorDimensions += "market"
     productFlavors {
-        create("play") {
-            dimension = "market"
-            manifestPlaceholders["APP_CHANNEL"] = "play.google.com"
-            versionNameSuffix = "-play"
-        }
         create("normal") {
             dimension = "market"
             manifestPlaceholders["APP_CHANNEL"] = "normal"
