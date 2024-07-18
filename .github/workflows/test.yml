@@ -41,27 +41,11 @@ jobs:
           path: ./app/build/outputs/apk/normal/release/app-normal-release-unsigned.apk
           if-no-files-found: error
 
-      - name: Uploading Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-play-release-unsigned.apk
-          path: ./app/build/outputs/apk/play/release/app-play-release-unsigned.apk
-          if-no-files-found: error
-
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: app/build/outputs/apk/normal/release/app-normal-release-unsigned.apk
           asset_name: app-normal-release-unsigned-${{ github.run_number }}.apk
-          tag: ${{ github.ref }}
-          overwrite: true
-
-      - name: Upload binaries to release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: app/build/outputs/apk/play/release/app-play-release-unsigned.apk
-          asset_name: app-play-release-unsigned-${{ github.run_number }}.apk
           tag: ${{ github.ref }}
           overwrite: true
