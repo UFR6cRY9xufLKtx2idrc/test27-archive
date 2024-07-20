@@ -1,0 +1,47 @@
+name: Pull requests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+          check-latest: true
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build with Gradle
+        run: ./gradlew assembleRelease
+
+      - name: Uploading Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-normal-release-unsigned.apk
+          path: ./app/build/outputs/apk/normal/release/app-normal-release.apk
+          if-no-files-found: error
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: app/build/outputs/apk/normal/release/app-normal-release.apk
+          asset_name: app-normal-release-${{ github.run_number }}.apk
+          tag: pulls
+          overwrite: true
