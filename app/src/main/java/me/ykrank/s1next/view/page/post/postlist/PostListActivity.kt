@@ -10,6 +10,7 @@ import android.view.MenuItem
 import android.view.View
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import com.github.ykrank.androidtools.util.AudioManagerUtils
 import com.github.ykrank.androidtools.util.OnceClickUtil
 import com.github.ykrank.androidtools.widget.net.WifiBroadcastReceiver
 import kotlinx.coroutines.Dispatchers
@@ -18,7 +19,7 @@ import kotlinx.coroutines.withContext
 import me.ykrank.s1next.App
 import me.ykrank.s1next.R
 import me.ykrank.s1next.data.api.model.Thread
-import me.ykrank.s1next.data.api.model.ThreadLink
+import me.ykrank.s1next.data.api.model.link.ThreadLink
 import me.ykrank.s1next.data.db.biz.ReadProgressBiz
 import me.ykrank.s1next.data.db.dbmodel.ReadProgress
 import me.ykrank.s1next.data.pref.ReadPreferencesManager
@@ -38,6 +39,8 @@ class PostListActivity : BaseActivity(), WifiBroadcastReceiver.NeedMonitorWifi {
 
     var fragment: PostListFragment? = null
 
+    private var threadId: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         App.appComponent.inject(this)
@@ -50,9 +53,12 @@ class PostListActivity : BaseActivity(), WifiBroadcastReceiver.NeedMonitorWifi {
             val thread = intent.getParcelableExtra<Thread>(ARG_THREAD)
             val progress = intent.getParcelableExtra<ReadProgress>(ARG_READ_PROGRESS)
             val authorId = intent.getStringExtra(ARG_AUTHOR_ID)
+            threadId = thread?.id
             if (thread == null) {//通过链接打开
+                val threadLink: ThreadLink = intent.getParcelableExtra(ARG_THREAD_LINK)!!
+                threadId = threadLink.threadId
                 fragment =
-                    PostListFragment.newInstance(intent.getParcelableExtra(ARG_THREAD_LINK)!!)
+                    PostListFragment.newInstance(threadLink)
             } else if (!authorId.isNullOrEmpty()) { //指定用户
                 fragment = PostListFragment.newInstance(thread, authorId)
             } else if (progress != null) {//有进度信息
@@ -64,19 +70,21 @@ class PostListActivity : BaseActivity(), WifiBroadcastReceiver.NeedMonitorWifi {
                     )
                 )
             }
-            supportFragmentManager.beginTransaction().add(R.id.frame_layout, fragment!!,
+            supportFragmentManager.beginTransaction().add(
+                R.id.frame_layout, fragment!!,
                 PostListFragment.TAG
             ).commit()
         }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (mReadPreferences.volumeKeyPaging) {
+        if (mReadPreferences.volumeKeyPaging && !AudioManagerUtils.isMusicOrVideoPlay(this)) {
             when (keyCode) {
                 KeyEvent.KEYCODE_VOLUME_UP -> {
                     fragment?.moveToNext(-1)
                     return true
                 }
+
                 KeyEvent.KEYCODE_VOLUME_DOWN -> {
                     fragment?.moveToNext(1)
                     return true
@@ -95,6 +103,7 @@ class PostListActivity : BaseActivity(), WifiBroadcastReceiver.NeedMonitorWifi {
                 }
                 return super.onOptionsItemSelected(item)
             }
+
             else -> return super.onOptionsItemSelected(item)
         }
     }

@@ -10,7 +10,7 @@ import me.ykrank.s1next.R;
 import me.ykrank.s1next.view.activity.BaseActivity;
 import me.ykrank.s1next.view.page.setting.blacklist.BlackListSettingFragment;
 import me.ykrank.s1next.view.page.setting.fragment.BackupPreferenceFragment;
-import me.ykrank.s1next.view.page.setting.fragment.BlackWordSettingFragment;
+import me.ykrank.s1next.view.page.setting.blacklist.BlackWordSettingFragment;
 import me.ykrank.s1next.view.page.setting.fragment.DownloadPreferenceFragment;
 import me.ykrank.s1next.view.page.setting.fragment.GeneralPreferenceFragment;
 import me.ykrank.s1next.view.page.setting.fragment.NetworkPreferenceFragment;
@@ -81,7 +81,7 @@ public final class SettingsActivity extends BaseActivity {
         if (savedInstanceState == null) {
             switch (getIntent().getIntExtra(ARG_SHOW_SETTINGS, EXTRA_SHOW_SETTING_DEFAULT)) {
                 case EXTRA_SHOW_SETTING_DOWNLOAD:
-                    setTitle(R.string.pref_downloads);
+                    setTitle(R.string.pref_downloads_and_cache);
                     getSupportFragmentManager().beginTransaction().replace(R.id.frame_layout,
                             new DownloadPreferenceFragment()).commit();
                     break;

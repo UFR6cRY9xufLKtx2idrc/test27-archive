@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
 
-    <style name="Preference.Overlay" parent="PreferenceThemeOverlay.v14" />
+    <style name="Preference.Overlay" parent="PreferenceThemeOverlay.v14.Material" />
 
     <style name="CustomCardView" parent="Widget.MaterialComponents.CardView">
         <item name="cardCornerRadius">4dp</item>
@@ -73,7 +73,7 @@
 
     <style name="WindowAnimations">
         <item name="android:windowEnterAnimation">@null</item>
-        <item name="android:windowExitAnimation">@anim/fade_out_rapidly</item>
+        <item name="android:windowExitAnimation">@anim/fade_out_quick</item>
     </style>
 
     <style name="CustomToolbarTitle" parent="TextAppearance.Widget.AppCompat.Toolbar.Title">

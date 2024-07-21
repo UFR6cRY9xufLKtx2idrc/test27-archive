@@ -1,13 +1,9 @@
 package me.ykrank.s1next.view.dialog
 
-import android.app.Dialog
 import android.content.DialogInterface
 import android.os.Bundle
-import androidx.annotation.MainThread
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
-import android.view.Window
+import androidx.annotation.MainThread
 import com.github.ykrank.androidautodispose.AndroidRxDispose
 import com.github.ykrank.androidlifecycle.event.FragmentEvent
 import com.github.ykrank.androidtools.extension.toast
@@ -18,7 +14,6 @@ import me.ykrank.s1next.data.api.S1Service
 import me.ykrank.s1next.data.api.model.WebBlackListInfo
 import me.ykrank.s1next.data.db.biz.BlackListBiz
 import me.ykrank.s1next.data.db.dbmodel.BlackList
-import me.ykrank.s1next.databinding.DialogLoadBlacklistFromWebBinding
 import me.ykrank.s1next.util.ErrorUtil
 import javax.inject.Inject
 
@@ -26,68 +21,60 @@ import javax.inject.Inject
 /**
  * A dialog lets user load website blacklist.
  */
-class LoadBlackListFromWebDialogFragment : BaseDialogFragment() {
+class LoadBlackListFromWebDialogFragment : BaseLoadProgressDialogFragment() {
     @Inject
     lateinit var s1Service: S1Service
+
     @Inject
     lateinit var mUser: User
+
     @Inject
     lateinit var blackListBiz: BlackListBiz
 
-   private var callBack:(()->Unit)? = null
-
-    private lateinit var binding: DialogLoadBlacklistFromWebBinding
+    private var callBack: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         App.appComponent.inject(this)
         super.onCreate(savedInstanceState)
     }
 
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-        binding = DialogLoadBlacklistFromWebBinding.inflate(inflater, container, false)
-
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
         loadNextPage()
-
-        return binding.root
-    }
-
-    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        val dialog = super.onCreateDialog(savedInstanceState)
-        dialog.window?.requestFeature(Window.FEATURE_NO_TITLE)
-
-        return dialog
-    }
-
-    override fun onStart() {
-        super.onStart()
-        dialog?.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     @MainThread
     private fun loadNextPage(page: Int = 1) {
         s1Service.getWebBlackList(mUser.uid, page)
-                .map { WebBlackListInfo.fromHtml(it) }
-                .map {
-                    it.users.forEach { pair ->
-                        blackListBiz.saveBlackList(BlackList(pair.first, pair.second, BlackList.HIDE_POST, BlackList.HIDE_FORUM))
-                    }
-                    it
+            .map { WebBlackListInfo.fromHtml(it) }
+            .map {
+                it.users.forEach { pair ->
+                    blackListBiz.saveBlackList(
+                        BlackList(
+                            pair.first,
+                            pair.second,
+                            BlackList.HIDE_POST,
+                            BlackList.HIDE_FORUM
+                        )
+                    )
                 }
-                .compose(RxJavaUtil.iOSingleTransformer())
-                .to(AndroidRxDispose.withSingle(this, FragmentEvent.DESTROY))
-                .subscribe({
-                    binding.max = it.max
-                    binding.progress = it.page
+                it
+            }
+            .compose(RxJavaUtil.iOSingleTransformer())
+            .to(AndroidRxDispose.withSingle(this, FragmentEvent.DESTROY))
+            .subscribe({
+                binding.max = it.max
+                binding.progress = it.page
 
-                    if (it.max > it.page) {
-                        loadNextPage(it.page + 1)
-                    }else{
-                        this@LoadBlackListFromWebDialogFragment.dismiss()
-                    }
-                }, {
-                    val activity = activity ?: return@subscribe
-                    activity.toast(ErrorUtil.parse(activity, it))
-                })
+                if (it.max > it.page) {
+                    loadNextPage(it.page + 1)
+                } else {
+                    this@LoadBlackListFromWebDialogFragment.dismiss()
+                }
+            }, {
+                val activity = activity ?: return@subscribe
+                activity.toast(ErrorUtil.parse(activity, it))
+            })
     }
 
     override fun onDismiss(dialog: DialogInterface) {
@@ -102,7 +89,7 @@ class LoadBlackListFromWebDialogFragment : BaseDialogFragment() {
     companion object {
         val TAG: String = LoadBlackListFromWebDialogFragment::class.java.name
 
-        fun newInstance(callBack:(()->Unit)?= null): LoadBlackListFromWebDialogFragment {
+        fun newInstance(callBack: (() -> Unit)? = null): LoadBlackListFromWebDialogFragment {
             val fragment = LoadBlackListFromWebDialogFragment()
             fragment.callBack = callBack
             return fragment

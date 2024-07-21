@@ -2,7 +2,6 @@ package me.ykrank.s1next.view.activity
 
 import android.app.Activity
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -11,6 +10,7 @@ import androidx.annotation.MainThread
 import androidx.core.app.ActivityCompat
 import androidx.core.app.ActivityOptionsCompat
 import androidx.databinding.DataBindingUtil
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.github.ykrank.androidautodispose.AndroidRxDispose
 import com.github.ykrank.androidlifecycle.event.ActivityEvent
@@ -22,8 +22,9 @@ import com.github.ykrank.androidtools.util.RxJavaUtil
 import com.github.ykrank.androidtools.widget.AppBarOffsetChangedListener
 import com.github.ykrank.androidtools.widget.glide.model.ImageInfo
 import com.google.android.material.appbar.AppBarLayout
-import com.google.common.base.Optional
-import io.reactivex.Single
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.ykrank.s1next.App
 import me.ykrank.s1next.R
 import me.ykrank.s1next.data.api.Api
@@ -75,44 +76,8 @@ class UserHomeActivity : BaseActivity() {
         profile.homeUsername = name
         binding.data = profile
 
-        binding.appBar.addOnOffsetChangedListener(object : AppBarOffsetChangedListener() {
-            override fun onStateChanged(appBarLayout: AppBarLayout, oldVerticalOffset: Int, verticalOffset: Int) {
-                val maxScroll = appBarLayout.totalScrollRange
-                val oldPercentage = Math.abs(oldVerticalOffset).toFloat() / maxScroll.toFloat()
-                val percentage = Math.abs(verticalOffset).toFloat() / maxScroll.toFloat()
-                if (oldPercentage < PERCENTAGE_TO_SHOW_TITLE_AT_TOOLBAR && percentage >= PERCENTAGE_TO_SHOW_TITLE_AT_TOOLBAR) {
-                    //Move up
-                    AnimUtils.startAlphaAnimation(binding.toolbarTitle, TITLE_ANIMATIONS_DURATION.toLong(), View.VISIBLE)
-                } else if (oldPercentage >= PERCENTAGE_TO_SHOW_TITLE_AT_TOOLBAR && percentage < PERCENTAGE_TO_SHOW_TITLE_AT_TOOLBAR) {
-                    //Move down
-                    AnimUtils.startAlphaAnimation(binding.toolbarTitle, TITLE_ANIMATIONS_DURATION.toLong(), View.INVISIBLE)
-                }
-            }
-        })
-
-        binding.avatar.setOnClickListener { v ->
-            val bigAvatarUrl = Api.getAvatarBigUrl(uid)
-            GalleryActivity.start(v.context, bigAvatarUrl)
-        }
-
-        binding.ivNewPm.setOnClickListener { v ->
-            binding.data?.let {
-                NewPmActivity.startNewPmActivityForResultMessage(this,
-                        it.homeUid, it.homeUsername)
-            }
-        }
-
-        binding.tvFriends.setOnClickListener { v -> FriendListActivity.start(this, uid, name) }
-
-        binding.tvThreads.setOnClickListener { v -> UserThreadActivity.start(this, uid, name) }
-
-        binding.tvReplies.setOnClickListener { v -> UserReplyActivity.start(this, uid, name) }
-
-        binding.recyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
-        binding.recyclerView.isNestedScrollingEnabled = false
-        adapter = SimpleRecycleViewAdapter(this, R.layout.item_home_stat, false)
-        binding.recyclerView.adapter = adapter
-
+        initTransition()
+        initListener()
         setupImage()
         loadData()
     }
@@ -134,51 +99,119 @@ class UserHomeActivity : BaseActivity() {
                 onBackPressed()
                 return true
             }
+
             R.id.menu_blacklist -> {
                 if (isInBlacklist) {
-                    BlacklistMenuAction.removeBlacklist(this, mRxBus, uid?.toInt() ?: 0, name)
+                    BlacklistMenuAction.removeBlacklist(this, mEventBus, uid?.toInt() ?: 0, name)
                 } else {
                     BlacklistMenuAction.addBlacklist(this, uid?.toInt() ?: 0, name)
                 }
                 return true
             }
+
             else -> return super.onOptionsItemSelected(item)
         }
     }
 
     override fun onResume() {
         super.onResume()
-        mRxBus.get()
-                .ofType(BlackListChangeEvent::class.java)
-                .to(AndroidRxDispose.withObservable(this, ActivityEvent.PAUSE))
-                .subscribe { blackListEvent ->
-                    val dbWrapper = BlackListBiz.getInstance()
+        mEventBus.get()
+            .ofType(BlackListChangeEvent::class.java)
+            .to(AndroidRxDispose.withObservable(this, ActivityEvent.PAUSE))
+            .subscribe { blackListEvent ->
+                val dbWrapper = BlackListBiz.getInstance()
+                lifecycleScope.launch(Dispatchers.IO) {
                     if (blackListEvent.isAdd) {
-                        Single.just(true)
-                                .doOnSuccess { b ->
-                                    dbWrapper.saveDefaultBlackList(
-                                            blackListEvent.authorPostId, blackListEvent.authorPostName,
-                                            blackListEvent.remark)
-                                }
-                                .compose(RxJavaUtil.iOSingleTransformer())
-                            .to(AndroidRxDispose.withSingle(this, ActivityEvent.DESTROY))
-                                .subscribe({ this.afterBlackListChange(it) }, { L.report(it) })
+                        dbWrapper.saveDefaultBlackList(
+                            blackListEvent.authorPostId, blackListEvent.authorPostName,
+                            blackListEvent.remark
+                        )
                     } else {
-                        Single.just(false)
-                                .doOnSuccess { b ->
-                                    dbWrapper.delDefaultBlackList(blackListEvent.authorPostId,
-                                            blackListEvent.authorPostName)
-                                }
-                                .compose(RxJavaUtil.iOSingleTransformer())
-                            .to(AndroidRxDispose.withSingle(this, ActivityEvent.DESTROY))
-                                .subscribe({ this.afterBlackListChange(it) }, { L.report(it) })
+                        dbWrapper.delDefaultBlackList(
+                            blackListEvent.authorPostId,
+                            blackListEvent.authorPostName
+                        )
                     }
                 }
+            }
     }
 
     private fun afterBlackListChange(isAdd: Boolean) {
         showShortToast(if (isAdd) R.string.blacklist_add_success else R.string.blacklist_remove_success)
         refreshBlacklistMenu()
+    }
+
+    private fun initTransition() {
+        if (!intent.getBooleanExtra(ARG_TRANSITION, false)) {
+            window.setSharedElementReturnTransition(null)
+            window.setSharedElementReenterTransition(null)
+            binding.avatar.transitionName = null
+            overrideActivityTransition(
+                OVERRIDE_TRANSITION_OPEN,
+                com.github.ykrank.androidtools.R.anim.slide_in_right_quick,
+                0
+            )
+            overrideActivityTransition(
+                OVERRIDE_TRANSITION_CLOSE,
+                0,
+                com.github.ykrank.androidtools.R.anim.slide_out_right_quick
+            )
+        }
+    }
+
+    private fun initListener() {
+
+        binding.appBar.addOnOffsetChangedListener(object : AppBarOffsetChangedListener() {
+            override fun onStateChanged(
+                appBarLayout: AppBarLayout,
+                oldVerticalOffset: Int,
+                verticalOffset: Int
+            ) {
+                val maxScroll = appBarLayout.totalScrollRange
+                val oldPercentage = Math.abs(oldVerticalOffset).toFloat() / maxScroll.toFloat()
+                val percentage = Math.abs(verticalOffset).toFloat() / maxScroll.toFloat()
+                if (oldPercentage < PERCENTAGE_TO_SHOW_TITLE_AT_TOOLBAR && percentage >= PERCENTAGE_TO_SHOW_TITLE_AT_TOOLBAR) {
+                    //Move up
+                    AnimUtils.startAlphaAnimation(
+                        binding.toolbarTitle,
+                        TITLE_ANIMATIONS_DURATION.toLong(),
+                        View.VISIBLE
+                    )
+                } else if (oldPercentage >= PERCENTAGE_TO_SHOW_TITLE_AT_TOOLBAR && percentage < PERCENTAGE_TO_SHOW_TITLE_AT_TOOLBAR) {
+                    //Move down
+                    AnimUtils.startAlphaAnimation(
+                        binding.toolbarTitle,
+                        TITLE_ANIMATIONS_DURATION.toLong(),
+                        View.INVISIBLE
+                    )
+                }
+            }
+        })
+
+        binding.avatar.setOnClickListener { v ->
+            val bigAvatarUrl = Api.getAvatarBigUrl(uid)
+            GalleryActivity.start(v.context, bigAvatarUrl)
+        }
+
+        binding.ivNewPm.setOnClickListener { v ->
+            binding.data?.let {
+                NewPmActivity.startNewPmActivityForResultMessage(
+                    this,
+                    it.homeUid, it.homeUsername
+                )
+            }
+        }
+
+        binding.tvFriends.setOnClickListener { v -> FriendListActivity.start(this, uid, name) }
+
+        binding.tvThreads.setOnClickListener { v -> UserThreadActivity.start(this, uid, name) }
+
+        binding.tvReplies.setOnClickListener { v -> UserReplyActivity.start(this, uid, name) }
+
+        binding.recyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        binding.recyclerView.isNestedScrollingEnabled = false
+        adapter = SimpleRecycleViewAdapter(this, R.layout.item_home_stat, false)
+        binding.recyclerView.adapter = adapter
     }
 
     private fun setupImage() {
@@ -187,14 +220,18 @@ class UserHomeActivity : BaseActivity() {
 
     private fun loadData() {
         binding.data?.let { profile ->
-            s1Service.getProfileWeb("https://bbs.saraba1st.com/2b/space-uid-${profile.homeUid}.html", profile.homeUid)
-                    .map { Profile.fromHtml(it) }
-                    .compose(RxJavaUtil.iOSingleTransformer())
-                    .to(AndroidRxDispose.withSingle(this, ActivityEvent.DESTROY))
-                    .subscribe({
-                        binding.data = it
-                        adapter.swapDataSet(it.stats)
-                    }, L::e)
+
+            s1Service.getProfileWeb(
+                "${Api.BASE_URL}space-uid-${profile.homeUid}.html",
+                profile.homeUid
+            )
+                .map { Profile.fromHtml(it) }
+                .compose(RxJavaUtil.iOSingleTransformer())
+                .to(AndroidRxDispose.withSingle(this, ActivityEvent.DESTROY))
+                .subscribe({
+                    binding.data = it
+                    adapter.swapDataSet(it.stats)
+                }, L::e)
         }
     }
 
@@ -204,18 +241,19 @@ class UserHomeActivity : BaseActivity() {
             return
         }
         val wrapper = BlackListBiz.getInstance()
-        Single.just(Optional.fromNullable(wrapper.getMergedBlackList(uid?.toInt() ?: 0, name)))
-                .compose(RxJavaUtil.iOSingleTransformer())
-                .to(AndroidRxDispose.withSingle(this, ActivityEvent.DESTROY))
-                .subscribe({ blackListOptional ->
-                    if (blackListOptional.isPresent) {
-                        isInBlacklist = true
-                        blacklistMenu?.setTitle(R.string.menu_blacklist_remove)
-                    } else {
-                        isInBlacklist = false
-                        blacklistMenu?.setTitle(R.string.menu_blacklist_add)
-                    }
-                }, { L.report(it) })
+
+        lifecycleScope.launch(L.report) {
+            val blackList = withContext(Dispatchers.IO) {
+                wrapper.getMergedBlackList(uid?.toInt() ?: 0, name)
+            }
+            if (blackList != null) {
+                isInBlacklist = true
+                blacklistMenu?.setTitle(R.string.menu_blacklist_remove)
+            } else {
+                isInBlacklist = false
+                blacklistMenu?.setTitle(R.string.menu_blacklist_add)
+            }
+        }
     }
 
     companion object {
@@ -226,9 +264,18 @@ class UserHomeActivity : BaseActivity() {
         private const val ARG_UID = "uid"
         private const val ARG_USERNAME = "username"
         private const val ARG_IMAGE_INFO = "image_info"
+        private const val ARG_TRANSITION = "transition"
 
-        fun start(activity: androidx.fragment.app.FragmentActivity, uid: String, userName: String?) {
-            if (LoginPromptDialogFragment.showLoginPromptDialogIfNeeded(activity.supportFragmentManager, App.appComponent.user)) {
+        fun start(
+            activity: FragmentActivity,
+            uid: String,
+            userName: String?
+        ) {
+            if (LoginPromptDialogFragment.showLoginPromptDialogIfNeeded(
+                    activity.supportFragmentManager,
+                    App.appComponent.user
+                )
+            ) {
                 return
             }
 
@@ -238,13 +285,17 @@ class UserHomeActivity : BaseActivity() {
             activity.startActivity(intent)
         }
 
-        fun start(activity: androidx.fragment.app.FragmentActivity, uid: String, userName: String?, avatarView: View) {
-            //@see http://stackoverflow.com/questions/31381385/nullpointerexception-drawable-setbounds-probably-due-to-fragment-transitions#answer-31383033
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.LOLLIPOP) {
-                start(activity, uid, userName)
-                return
-            }
-            if (LoginPromptDialogFragment.showLoginPromptDialogIfNeeded(activity.supportFragmentManager, App.appComponent.user)) {
+        fun start(
+            activity: FragmentActivity,
+            uid: String,
+            userName: String?,
+            avatarView: View
+        ) {
+            if (LoginPromptDialogFragment.showLoginPromptDialogIfNeeded(
+                    activity.supportFragmentManager,
+                    App.appComponent.user
+                )
+            ) {
                 return
             }
 
@@ -255,15 +306,18 @@ class UserHomeActivity : BaseActivity() {
                 L.report(IllegalStateException("UserHomeActivity start error: context not instance of activity"))
                 return
             }
-            val imageInfo = avatarView.getTag(com.github.ykrank.androidtools.R.id.tag_drawable_info) as ImageInfo?
+            val imageInfo =
+                avatarView.getTag(com.github.ykrank.androidtools.R.id.tag_drawable_info) as ImageInfo?
             val intent = Intent(baseContext, UserHomeActivity::class.java)
             intent.putExtra(ARG_UID, uid)
             intent.putExtra(ARG_USERNAME, userName)
+            intent.putExtra(ARG_TRANSITION, true)
             if (imageInfo != null) {
                 intent.putExtra(ARG_IMAGE_INFO, imageInfo)
             }
             val options = ActivityOptionsCompat.makeSceneTransitionAnimation(
-                    baseContext, avatarView, baseContext.getString(R.string.transition_avatar))
+                baseContext, avatarView, baseContext.getString(R.string.transition_avatar)
+            )
             ActivityCompat.startActivity(baseContext, intent, options.toBundle())
         }
     }

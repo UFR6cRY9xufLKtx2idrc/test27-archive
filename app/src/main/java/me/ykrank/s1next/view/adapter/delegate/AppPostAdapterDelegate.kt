@@ -7,7 +7,7 @@ import android.view.ViewGroup
 import androidx.databinding.DataBindingUtil
 import androidx.lifecycle.LifecycleOwner
 import com.github.ykrank.androidtools.ui.adapter.simple.SimpleRecycleViewHolder
-import com.github.ykrank.androidtools.widget.RxBus
+import com.github.ykrank.androidtools.widget.EventBus
 import me.ykrank.s1next.App
 import me.ykrank.s1next.R
 import me.ykrank.s1next.data.User
@@ -29,7 +29,7 @@ class AppPostAdapterDelegate(
 ) {
 
     @Inject
-    internal lateinit var mRxBus: RxBus
+    internal lateinit var mEventBus: EventBus
     @Inject
     internal lateinit var mUser: User
     @Inject
@@ -47,14 +47,14 @@ class AppPostAdapterDelegate(
         binding.tvReply.setTextIsSelectable(selectable)
         binding.authorName.movementMethod = LinkMovementMethod.getInstance()
         binding.tvFloor.movementMethod = LinkMovementMethod.getInstance()
-        binding.tvReply.movementMethod = PostMovementMethod.getInstance()
+        binding.tvReply.movementMethod = PostMovementMethod.instance
         binding.tvFloor.isLongClickable = false
     }
 
     public override fun onCreateViewHolder(parent: ViewGroup): androidx.recyclerview.widget.RecyclerView.ViewHolder {
         val binding = DataBindingUtil.inflate<ItemAppPostBinding>(mLayoutInflater,
                 R.layout.item_app_post, parent, false)
-        binding.postViewModel = AppPostViewModel(lifecycleOwner, mRxBus, mUser)
+        binding.postViewModel = AppPostViewModel(lifecycleOwner, mEventBus, mUser)
 
         //If setTextIsSelectable, then should reset movement
         val selectable = mGeneralPreferencesManager.isPostSelectable
@@ -87,7 +87,7 @@ class AppPostAdapterDelegate(
     // https://code.google.com/p/android/issues/detail?id=208169
     override fun onViewAttachedToWindow(holder: androidx.recyclerview.widget.RecyclerView.ViewHolder) {
         super.onViewAttachedToWindow(holder)
-        if (mGeneralPreferencesManager!!.isPostSelectable) {
+        if (mGeneralPreferencesManager.isPostSelectable) {
             val binding = (holder as SimpleRecycleViewHolder<ItemAppPostBinding>).binding
             binding.authorName.isEnabled = false
             binding.tvFloor.isEnabled = false

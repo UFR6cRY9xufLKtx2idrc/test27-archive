@@ -3,7 +3,7 @@ package me.ykrank.s1next
 import android.content.Context
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.github.ykrank.androidtools.widget.EditorDiskCache
-import com.github.ykrank.androidtools.widget.RxBus
+import com.github.ykrank.androidtools.widget.EventBus
 import dagger.Module
 import dagger.Provides
 import me.ykrank.s1next.data.User
@@ -15,8 +15,8 @@ import me.ykrank.s1next.data.api.UserValidator
 import me.ykrank.s1next.data.api.app.AppApi
 import me.ykrank.s1next.data.api.app.AppService
 import me.ykrank.s1next.data.api.app.AppTokenInterceptor
-import me.ykrank.s1next.data.api.empty.S1ApiCacheProvider
-import me.ykrank.s1next.data.db.biz.CacheBiz
+import me.ykrank.s1next.data.cache.api.S1ApiCacheProvider
+import me.ykrank.s1next.data.cache.CacheBiz
 import me.ykrank.s1next.data.pref.AppDataPreferencesManager
 import me.ykrank.s1next.data.pref.DownloadPreferencesManager
 import me.ykrank.s1next.data.pref.NetworkPreferencesManager
@@ -192,8 +192,8 @@ class AppModule {
 
     @Provides
     @AppLife
-    fun provideNoticeCheckTask(rxBus: RxBus, s1Service: S1Service, user: User): NoticeCheckTask {
-        return NoticeCheckTask(rxBus, s1Service, user)
+    fun provideNoticeCheckTask(eventBus: EventBus, s1Service: S1Service, user: User): NoticeCheckTask {
+        return NoticeCheckTask(eventBus, s1Service, user)
     }
 
     @Provides

@@ -1,7 +1,6 @@
 package me.ykrank.s1next.view.page.login
 
 import android.os.Bundle
-import com.github.ykrank.androidtools.widget.RxBus
 import io.reactivex.Single
 import me.ykrank.s1next.App
 import me.ykrank.s1next.R
@@ -39,6 +38,11 @@ class AppLoginDialogFragment : BaseLoginDialogFragment<AppDataWrapper<AppLoginRe
         } else {
             Result(false, data.message)
         }
+    }
+
+    override fun onSuccess(data: AppDataWrapper<AppLoginResult>, result: Result) {
+        super.onSuccess(data, result)
+        mEventBus?.postDefault(AppLoginEvent())
     }
 
     companion object {

@@ -2,7 +2,6 @@ package me.ykrank.s1next.view.page.post.postlist
 
 import android.content.Context
 import android.os.Bundle
-import android.os.SystemClock
 import android.text.TextUtils
 import android.view.LayoutInflater
 import android.view.View
@@ -22,19 +21,17 @@ import com.github.ykrank.androidtools.ui.internal.LoadingViewModelBindingDelegat
 import com.github.ykrank.androidtools.util.L
 import com.github.ykrank.androidtools.util.LooperUtil
 import com.github.ykrank.androidtools.util.RxJavaUtil
-import com.github.ykrank.androidtools.widget.RxBus
 import com.github.ykrank.androidtools.widget.recycleview.StartSnapLinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import io.reactivex.Single
 import io.reactivex.disposables.Disposable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.ykrank.s1next.App
 import me.ykrank.s1next.R
 import me.ykrank.s1next.data.api.model.Post
-import me.ykrank.s1next.data.api.model.Rate
 import me.ykrank.s1next.data.api.model.Thread
 import me.ykrank.s1next.data.api.model.collection.Posts
 import me.ykrank.s1next.data.api.model.wrapper.PostsWrapper
@@ -62,9 +59,6 @@ import javax.inject.Inject
  */
 class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
     OnQuickSideBarTouchListener {
-
-    @Inject
-    internal lateinit var mRxBus: RxBus
 
     @Inject
     internal lateinit var mGeneralPreferencesManager: GeneralPreferencesManager
@@ -98,9 +92,6 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
     private var mPagerCallback: PagerCallback? = null
 
     private var refreshAfterBlacklistChangeDisposable: Disposable? = null
-
-    private val rateMap = hashMapOf<Int, List<Rate>>()
-    private var rateStamp: Long = 0
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
@@ -156,17 +147,17 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
 
         quickSideBarView.setOnQuickSideBarTouchListener(this)
 
-        mRxBus.get()
+        mEventBus.get()
             .ofType(PostSelectableChangeEvent::class.java)
             .to(AndroidRxDispose.withObservable(this, FragmentEvent.DESTROY_VIEW))
             .subscribe({ mRecyclerAdapter.notifyDataSetChanged() }, { super.onError(it) })
 
-        mRxBus.get()
+        mEventBus.get()
             .ofType(QuickSidebarEnableChangeEvent::class.java)
             .to(AndroidRxDispose.withObservable(this, FragmentEvent.DESTROY_VIEW))
             .subscribe({ invalidateQuickSidebarVisible() }, { super.onError(it) })
 
-        mRxBus.get()
+        mEventBus.get()
             .ofType(BlackListChangeEvent::class.java)
             .to(AndroidRxDispose.withObservable(this, FragmentEvent.DESTROY_VIEW))
             .subscribe { startBlackListRefresh() }
@@ -243,17 +234,13 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
     internal fun saveReadProgress() {
         val readProgress = curReadProgress
         if (readProgress != null) {
-            Single.fromCallable {
-                LooperUtil.enforceOnWorkThread()
-                val dbWrapper = ReadProgressBiz.instance
-                dbWrapper.saveReadProgress(readProgress)
-                true
-            }.compose(RxJavaUtil.iOSingleTransformer<Boolean>())
-                .to(AndroidRxDispose.withSingle<Boolean>(this, FragmentEvent.DESTROY))
-                .subscribe({ b ->
-                    LooperUtil.enforceOnMainThread()
-                    showShortText(R.string.save_read_progress_success)
-                }, { L.report(it) })
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) {
+                    val dbWrapper = ReadProgressBiz.instance
+                    dbWrapper.saveReadProgress(readProgress)
+                }
+                showShortText(R.string.save_read_progress_success)
+            }
         }
     }
 
@@ -289,11 +276,19 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
         return Pair(itemPosition, offset)
     }
 
-    override suspend fun getSource(loading: Int): Flow<Resource<PostsWrapper>>? {
+    override suspend fun getSource(loading: Int): Flow<Resource<PostsWrapper>> {
         return apiCacheProvider.getPostsWrapper(
-            mThreadId, mAuthorId, mPageNum,
-            CacheParam(isForceLoading, listOf(mThreadId, mPageNum, mAuthorId))
-        )
+            mThreadId, mPageNum, mAuthorId,
+            CacheParam(isForceLoading)
+        ) { pid, rates ->
+            mRecyclerAdapter.dataSet.filterIsInstance<Post>()
+                .forEachIndexed { index, post ->
+                    if (post.id == pid) {
+                        post.rates = rates
+                        mRecyclerAdapter.notifyItemChanged(index)
+                    }
+                }
+        }
     }
 
     override fun onNextSuccess(resource: Resource.Success<PostsWrapper>) {
@@ -341,16 +336,6 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
             }
         } else {
             initQuickSidebar(mPageNum, postList)
-
-            //Set old rates to data
-            postList.forEach {
-                val rates = rateMap[it.id]
-                if (rates != null) {
-                    it.rates = rates
-                }
-            }
-
-            loadRates(postList)
 
             //Thread info must not null, or exception
             val postListInfo = posts?.postListInfo as Thread
@@ -421,39 +406,6 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
             mRecyclerAdapter.notifyDataSetChanged()
         }
         return enable
-    }
-
-    private fun loadRates(posts: List<Post>) {
-        val time = SystemClock.elapsedRealtime()
-        if (time - rateStamp < 10_000) {
-            //Do not load too frequently
-            return
-        }
-        rateStamp = time
-
-        lifecycleScope.launch(L.report) {
-            posts.filter { it.rates?.size == 0 && rateMap[it.id] == null }
-                .distinctBy { it.id }
-                .asFlow()
-                .map {
-                    val pid = it.id
-                    val rates = mS1Service.getRates(mThreadId, pid.toString())
-                    Pair(pid, Rate.fromHtml(rates))
-                }.collect {
-                    val pid = it.first
-                    val rates = it.second
-                    if (pid != null && rates?.isNotEmpty() == true) {
-                        rateMap[pid] = rates
-                        mRecyclerAdapter.dataSet.filterIsInstance(Post::class.java)
-                            .forEachIndexed { index, post ->
-                                if (post.id == pid) {
-                                    post.rates = rates
-                                    mRecyclerAdapter.notifyItemChanged(index)
-                                }
-                            }
-                    }
-                }
-        }
     }
 
     private fun initQuickSidebar(page: Int, posts: List<Post>) {
@@ -548,10 +500,8 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
         }
 
         internal fun saveReadProgressBack(readProgress: ReadProgress) {
-            java.lang.Thread {
-                val dbWrapper = ReadProgressBiz.instance
-                dbWrapper.saveReadProgress(readProgress)
-            }.start()
+            val dbWrapper = ReadProgressBiz.instance
+            dbWrapper.saveReadProgressAsync(readProgress)
         }
 
         private fun filterPostAfterBlacklistChanged(dataSet: List<Any>): List<Any> {

@@ -11,20 +11,26 @@ import android.view.MenuItem
 import android.view.View
 import androidx.annotation.MainThread
 import androidx.fragment.app.FragmentManager
+import androidx.lifecycle.lifecycleScope
 import com.github.ykrank.androidautodispose.AndroidRxDispose
 import com.github.ykrank.androidlifecycle.event.FragmentEvent
+import com.github.ykrank.androidtools.extension.throttleFirst
 import com.github.ykrank.androidtools.ui.internal.CoordinatorLayoutAnchorDelegate
 import com.github.ykrank.androidtools.util.*
-import com.github.ykrank.androidtools.widget.RxBus
+import com.github.ykrank.androidtools.widget.EventBus
 import io.reactivex.Single
-import io.reactivex.schedulers.Schedulers
-import io.reactivex.subjects.PublishSubject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.ykrank.s1next.App
 import me.ykrank.s1next.R
 import me.ykrank.s1next.data.api.Api
 import me.ykrank.s1next.data.api.model.Thread
-import me.ykrank.s1next.data.api.model.ThreadLink
 import me.ykrank.s1next.data.api.model.collection.Posts
+import me.ykrank.s1next.data.api.model.link.ThreadLink
 import me.ykrank.s1next.data.db.biz.HistoryBiz
 import me.ykrank.s1next.data.db.biz.ReadProgressBiz
 import me.ykrank.s1next.data.db.biz.ThreadBiz
@@ -45,6 +51,7 @@ import me.ykrank.s1next.view.fragment.BaseViewPagerFragment
 import me.ykrank.s1next.view.internal.PagerScrollState
 import me.ykrank.s1next.view.internal.RequestCode
 import me.ykrank.s1next.view.page.edit.EditPostActivity
+import me.ykrank.s1next.view.page.post.prefetch.ThreadPrefetchDialogFragment
 import me.ykrank.s1next.widget.track.event.ViewThreadTrackEvent
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -54,10 +61,11 @@ import javax.inject.Inject
  * A Fragment includes [android.support.v4.view.ViewPager]
  * to represent each page of post lists.
  */
-class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCallback, View.OnClickListener {
+class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCallback,
+    View.OnClickListener {
 
     @Inject
-    internal lateinit var mRxBus: RxBus
+    internal lateinit var mEventBus: EventBus
 
     @Inject
     internal lateinit var mGeneralPreferencesManager: GeneralPreferencesManager
@@ -81,9 +89,17 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
     private var tempReadProgress: ReadProgress? = null
     private val scrollState = PagerScrollState()
 
-    private lateinit var mLastThreadInfoSubject: PublishSubject<Int>
+    private val mLastThreadInfoFlow by lazy {
+        MutableSharedFlow<Int>(
+            1, onBufferOverflow = BufferOverflow.DROP_OLDEST
+        )
+    }
 
-    private val mPostListPagerAdapter: PostListPagerAdapter by lazy { PostListPagerAdapter(childFragmentManager) }
+    private val mPostListPagerAdapter: PostListPagerAdapter by lazy {
+        PostListPagerAdapter(
+            childFragmentManager
+        )
+    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -97,22 +113,35 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
         mThreadTitle = thread.title
         mThreadId = thread.id!!
 
-        trackAgent.post(ViewThreadTrackEvent(mThreadTitle, mThreadId, hashMapOf(
-                Pair("Type", type.toString()),
-                Pair("Theme", mGeneralPreferencesManager.themeIndex.toString()),
-                Pair("Dark Theme", mGeneralPreferencesManager.darkThemeIndex.toString()),
-                Pair("FontScale", mGeneralPreferencesManager.fontScale.toString()),
-                Pair("SignatureEnabled", mGeneralPreferencesManager.isSignatureEnabled.toString()),
-                Pair("PostSelectable", mGeneralPreferencesManager.isPostSelectable.toString()),
-                Pair("QuickSideBarEnable", mGeneralPreferencesManager.isQuickSideBarEnable.toString()),
-                Pair("SaveAuto", mReadPrefManager.isSaveAuto.toString()),
-                Pair("LoadAuto", mReadPrefManager.isLoadAuto.toString()),
-                Pair("TotalImageCacheSize", mDownloadPrefManager.totalImageCacheSize.toString()),
-                Pair("TotalDataCacheSize", mDownloadPrefManager.totalDataCacheSize.toString()),
-                Pair("NetCacheEnable", mDownloadPrefManager.netCacheEnable.toString()),
-                Pair("AvatarsDownload", mDownloadPrefManager.isAvatarsDownload.toString()),
-                Pair("ImagesDownload", mDownloadPrefManager.isImagesDownload.toString())
-        )))
+        trackAgent.post(
+            ViewThreadTrackEvent(
+                mThreadTitle, mThreadId, hashMapOf(
+                    Pair("Type", type.toString()),
+                    Pair("Theme", mGeneralPreferencesManager.themeIndex.toString()),
+                    Pair("Dark Theme", mGeneralPreferencesManager.darkThemeIndex.toString()),
+                    Pair("FontScale", mGeneralPreferencesManager.fontScale.toString()),
+                    Pair(
+                        "SignatureEnabled",
+                        mGeneralPreferencesManager.isSignatureEnabled.toString()
+                    ),
+                    Pair("PostSelectable", mGeneralPreferencesManager.isPostSelectable.toString()),
+                    Pair(
+                        "QuickSideBarEnable",
+                        mGeneralPreferencesManager.isQuickSideBarEnable.toString()
+                    ),
+                    Pair("SaveAuto", mReadPrefManager.isSaveAuto.toString()),
+                    Pair("LoadAuto", mReadPrefManager.isLoadAuto.toString()),
+                    Pair(
+                        "TotalImageCacheSize",
+                        mDownloadPrefManager.totalImageCacheSize.toString()
+                    ),
+                    Pair("TotalDataCacheSize", mDownloadPrefManager.totalDataCacheSize.toString()),
+                    Pair("NetCacheEnable", mDownloadPrefManager.netCacheEnable.toString()),
+                    Pair("AvatarsDownload", mDownloadPrefManager.isAvatarsDownload.toString()),
+                    Pair("ImagesDownload", mDownloadPrefManager.isImagesDownload.toString())
+                )
+            )
+        )
         leavePageMsg("PostListFragment##ThreadTitle:$mThreadTitle,ThreadId:$mThreadId,Type:$type")
 
         //when seeing one's post, the authorId isn't null. Skip initialization in this case.
@@ -128,7 +157,7 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
             }
 
             // +1 for original post
-            val threadPage = MathUtil.divide(thread.reliesCount + 1, Api.POSTS_PER_PAGE)
+            val threadPage = thread.pageCount
             setTotalPages(Math.max(jumpPage, threadPage))
 
             if (jumpPage != 0) {
@@ -142,59 +171,71 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
         }
 
         (activity as CoordinatorLayoutAnchorDelegate).setupFloatingActionButton(
-                R.drawable.ic_insert_comment_black_24dp, this)
+            R.drawable.ic_insert_comment_black_24dp, this
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        mLastThreadInfoSubject = PublishSubject.create<Int>()
-        mLastThreadInfoSubject.throttleFirst(1, TimeUnit.SECONDS)
-                .observeOn(Schedulers.io())
-                .to(AndroidRxDispose.withObservable(this, FragmentEvent.DESTROY))
-                .subscribe({
-                    LooperUtil.enforceOnWorkThread()
-                    val dbThread = DbThread(Integer.valueOf(mThreadId), it)
-                    ThreadBiz.instance.saveThread(dbThread)
-                }, { L.report(it) })
+        lifecycleScope.launch(L.report) {
+            mLastThreadInfoFlow
+                .throttleFirst(1000L)
+                .collectLatest {
+                    withContext(Dispatchers.IO) {
+                        val dbThread = DbThread(Integer.valueOf(mThreadId), it)
+                        ThreadBiz.instance.saveThread(dbThread)
+                    }
+                }
+        }
     }
 
     override fun onResume() {
         super.onResume()
 
-        mRxBus.get()
-                .ofType(QuoteEvent::class.java)
-                .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
-                .subscribe { quoteEvent -> startReplyActivity(quoteEvent.quotePostId, quoteEvent.quotePostCount) }
-        mRxBus.get()
-                .ofType(RateEvent::class.java)
-                .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
-                .subscribe { event -> startRateActivity(event.threadId, event.postId) }
-        mRxBus.get()
-                .ofType(ReportEvent::class.java)
-                .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
-                .subscribe { event -> startReportActivity(event.threadId, event.postId, event.pageNum) }
+        mEventBus.get()
+            .ofType(QuoteEvent::class.java)
+            .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
+            .subscribe { quoteEvent ->
+                startReplyActivity(
+                    quoteEvent.quotePostId,
+                    quoteEvent.quotePostCount
+                )
+            }
+        mEventBus.get()
+            .ofType(RateEvent::class.java)
+            .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
+            .subscribe { event -> startRateActivity(event.threadId, event.postId) }
+        mEventBus.get()
+            .ofType(ReportEvent::class.java)
+            .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
+            .subscribe { event -> startReportActivity(event.threadId, event.postId, event.pageNum) }
 
-        mRxBus.get()
-                .ofType(EditPostEvent::class.java)
-                .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
-                .subscribe {
-                    val thread = it.thread
-                    val post = it.post
-                    EditPostActivity.startActivityForResult(
-                        this,
-                        RequestCode.REQUEST_CODE_EDIT_POST,
-                        thread,
-                        post
+        mEventBus.get()
+            .ofType(EditPostEvent::class.java)
+            .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
+            .subscribe {
+                val thread = it.thread
+                val post = it.post
+                EditPostActivity.startActivityForResult(
+                    this,
+                    RequestCode.REQUEST_CODE_EDIT_POST,
+                    thread,
+                    post
+                )
+            }
+        mEventBus.get()
+            .ofType(VotePostEvent::class.java)
+            .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
+            .subscribe {
+                if (!LoginPromptDialogFragment.showAppLoginPromptDialogIfNeeded(
+                        childFragmentManager,
+                        mUser
                     )
+                ) {
+                    VoteDialogFragment.newInstance(it.threadId, it.vote)
+                        .show(childFragmentManager, VoteDialogFragment.TAG)
                 }
-        mRxBus.get()
-                .ofType(VotePostEvent::class.java)
-                .to(AndroidRxDispose.withObservable(this, FragmentEvent.PAUSE))
-                .subscribe {
-                    if (!LoginPromptDialogFragment.showAppLoginPromptDialogIfNeeded(childFragmentManager, mUser)) {
-                        VoteDialogFragment.newInstance(it.threadId, it.vote).show(childFragmentManager, VoteDialogFragment.TAG)
-                    }
-                }
+            }
     }
 
     override fun onPause() {
@@ -204,13 +245,13 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
             tempReadProgress = fragment.curReadProgress
             if (tempReadProgress != null) {
                 Single.just(tempReadProgress)
-                        .delay(5, TimeUnit.SECONDS)
-                        .doOnError(L::report)
-                        .to(AndroidRxDispose.withSingle(this, FragmentEvent.DESTROY))
-                        .subscribe { b ->
-                            mReadPrefManager.saveLastReadProgress(b)
-                            L.i("Save last read progress:$b")
-                        }
+                    .delay(5, TimeUnit.SECONDS)
+                    .doOnError(L::report)
+                    .to(AndroidRxDispose.withSingle(this, FragmentEvent.DESTROY))
+                    .subscribe { b ->
+                        mReadPrefManager.saveLastReadProgress(b)
+                        L.i("Save last read progress:$b")
+                    }
             }
         } else {
             tempReadProgress = null
@@ -255,28 +296,42 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
         when (item.itemId) {
             R.id.menu_thread_attachment -> {
                 ThreadAttachmentDialogFragment.newInstance(mThreadAttachment).show(
-                        requireActivity().supportFragmentManager,
-                        ThreadAttachmentDialogFragment.TAG)
+                    requireActivity().supportFragmentManager,
+                    ThreadAttachmentDialogFragment.TAG
+                )
 
                 return true
             }
+
             R.id.menu_favourites_add -> {
-                if (!LoginPromptDialogFragment.showLoginPromptDialogIfNeeded(childFragmentManager, mUser)) {
+                if (!LoginPromptDialogFragment.showLoginPromptDialogIfNeeded(
+                        childFragmentManager,
+                        mUser
+                    )
+                ) {
                     ThreadFavouritesAddDialogFragment.newInstance(mThreadId, mThreadTitle).show(
-                            requireActivity().supportFragmentManager,
-                            ThreadFavouritesAddDialogFragment.TAG)
+                        requireActivity().supportFragmentManager,
+                        ThreadFavouritesAddDialogFragment.TAG
+                    )
                 }
 
                 return true
             }
+
             R.id.menu_link -> {
-                ClipboardUtil.copyText(context, "Url of $mThreadTitle", Api.getPostListUrlForBrowser(mThreadId,
-                        currentPage))
+                ClipboardUtil.copyText(
+                    context, "Url of $mThreadTitle", Api.getPostListUrlForBrowser(
+                        mThreadId,
+                        currentPage
+                    )
+                )
                 (activity as CoordinatorLayoutAnchorDelegate).showSnackbar(
-                        R.string.message_thread_link_copy)
+                    R.string.message_thread_link_copy
+                )
 
                 return true
             }
+
             R.id.menu_share -> {
                 val value: String
                 val url = Api.getPostListUrlForBrowser(mThreadId, currentPage)
@@ -294,40 +349,55 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
 
                 return true
             }
+
             R.id.menu_browser -> {
-                IntentUtil.startViewIntentExcludeOurApp(requireContext(), Uri.parse(
-                        Api.getPostListUrlForBrowser(mThreadId, currentPage + 1)))
+                IntentUtil.startViewIntentExcludeOurApp(
+                    requireContext(), Uri.parse(
+                        Api.getPostListUrlForBrowser(mThreadId, currentPage + 1)
+                    )
+                )
 
                 return true
             }
+
             R.id.menu_save_progress -> {
                 if (curPostPageFragment != null) {
                     curPostPageFragment?.saveReadProgress()
                 }
                 return true
             }
+
             R.id.menu_load_progress -> {
                 loadReadProgress()
                 return true
             }
+
             R.id.menu_post_selectable -> {
                 //Switch text selectable
                 PostSelectableChangeDialogFragment.newInstance(!item.isChecked)
-                        .setPositiveListener { dialog, which ->
-                            //reload all data
-                            item.isChecked = !item.isChecked
-                            mGeneralPreferencesManager.isPostSelectable = item.isChecked
-                            mRxBus.post(PostSelectableChangeEvent())
-                        }
-                        .show(childFragmentManager, null)
+                    .setPositiveListener { dialog, which ->
+                        //reload all data
+                        item.isChecked = !item.isChecked
+                        mGeneralPreferencesManager.isPostSelectable = item.isChecked
+                        mEventBus.postDefault(PostSelectableChangeEvent())
+                    }
+                    .show(childFragmentManager, null)
                 return true
             }
+
             R.id.menu_quick_side_bar_enable -> {
                 item.isChecked = !item.isChecked
                 mGeneralPreferencesManager.isQuickSideBarEnable = item.isChecked
-                mRxBus.post(QuickSidebarEnableChangeEvent())
+                mEventBus.postDefault(QuickSidebarEnableChangeEvent())
                 return true
             }
+
+            R.id.menu_prefetch_all_posts -> {
+                ThreadPrefetchDialogFragment.newInstance(mThreadId)
+                    .show(childFragmentManager, LoadBlackListFromWebDialogFragment.TAG)
+                return true
+            }
+
             else -> return super.onOptionsItemSelected(item)
         }
     }
@@ -363,12 +433,7 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
     private fun setTotalPageByPosts(threads: Int) {
         setTotalPages(MathUtil.divide(threads, Api.POSTS_PER_PAGE))
         //save reply count in database
-        try {
-            mLastThreadInfoSubject.onNext(threads - 1)
-        } catch (e: Exception) {
-            mLastThreadInfoSubject.onError(e)
-        }
-
+        mLastThreadInfoFlow.tryEmit(threads - 1)
     }
 
     private fun setThreadTitle(title: CharSequence?) {
@@ -403,18 +468,16 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
      * 读取阅读进度
      */
     internal fun loadReadProgress() {
-        Single.just(mThreadId)
-                .flatMap {
-                    val dbWrapper = ReadProgressBiz.instance
-                    val progress: ReadProgress? = dbWrapper.getWithThreadId(Integer.valueOf(it))
-                    if (progress == null) Single.never<ReadProgress>() else Single.just(progress)
-                }
-                .compose(RxJavaUtil.iOSingleTransformer())
-                .to(AndroidRxDispose.withSingle(this, FragmentEvent.PAUSE))
-                .subscribe({
-                    scrollState.state = PagerScrollState.BEFORE_SCROLL_PAGE
-                    this.afterLoadReadProgress(it)
-                }, L::report)
+        lifecycleScope.launch(L.report) {
+            val progress = withContext(Dispatchers.IO) {
+                val dbWrapper = ReadProgressBiz.instance
+                dbWrapper.getWithThreadId(mThreadId.toInt())
+            }
+            if (progress != null) {
+                scrollState.state = PagerScrollState.BEFORE_SCROLL_PAGE
+                afterLoadReadProgress(progress)
+            }
+        }
     }
 
     /**
@@ -451,8 +514,10 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
             return
         }
 
-        ReplyActivity.startReplyActivityForResultMessage(activity, mThreadId, mThreadTitle,
-                quotePostId, quotePostCount)
+        ReplyActivity.startReplyActivityForResultMessage(
+            activity, mThreadId, mThreadTitle,
+            quotePostId, quotePostCount
+        )
     }
 
     private fun startRateActivity(threadId: String, postId: String) {
@@ -478,14 +543,17 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
     private fun saveHistory() {
         val threadId = mThreadId.toInt()
         if (threadId > 0 && !TextUtils.isEmpty(mThreadTitle)) {
-            historyBiz.addNewHistory(History(threadId, mThreadTitle))
+            lifecycleScope.launch(Dispatchers.IO) {
+                historyBiz.addNewHistory(History(threadId, mThreadTitle))
+            }
         }
     }
 
     /**
      * Returns a Fragment corresponding to one of the pages of posts.
      */
-    private inner class PostListPagerAdapter constructor(fm: FragmentManager) : FragmentStatePagerAdapter<PostListPagerFragment>(fm) {
+    private inner class PostListPagerAdapter constructor(fm: FragmentManager) :
+        FragmentStatePagerAdapter<PostListPagerFragment>(fm) {
 
         override fun getItem(i: Int): PostListPagerFragment {
             val progress = readProgress
@@ -498,7 +566,8 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
                 arguments?.putString(ARG_QUOTE_POST_ID, null)
                 return PostListPagerFragment.newInstance(mThreadId, jumpPage, quotePostId)
             } else if (progress != null && progress.page == i + 1
-                    && scrollState.state == PagerScrollState.BEFORE_SCROLL_POSITION) {
+                && scrollState.state == PagerScrollState.BEFORE_SCROLL_POSITION
+            ) {
                 return PostListPagerFragment.newInstance(mThreadId, i + 1, progress, scrollState)
             } else {
                 return PostListPagerFragment.newInstance(

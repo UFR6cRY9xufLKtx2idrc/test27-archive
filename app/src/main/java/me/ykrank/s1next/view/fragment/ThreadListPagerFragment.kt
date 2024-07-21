@@ -8,7 +8,6 @@ import com.github.ykrank.androidautodispose.AndroidRxDispose
 import com.github.ykrank.androidlifecycle.event.FragmentEvent
 import com.github.ykrank.androidtools.data.CacheParam
 import com.github.ykrank.androidtools.data.Resource
-import com.github.ykrank.androidtools.widget.RxBus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import me.ykrank.s1next.App
@@ -30,9 +29,6 @@ import javax.inject.Inject
  * [PagerCallback] and [SubForumsCallback].
  */
 class ThreadListPagerFragment : BaseRecyclerViewFragment<ThreadsWrapper>() {
-
-    @Inject
-    internal lateinit var mRxBus: RxBus
 
     @Inject
     internal lateinit var mGeneralPreferencesManager: GeneralPreferencesManager
@@ -58,7 +54,7 @@ class ThreadListPagerFragment : BaseRecyclerViewFragment<ThreadsWrapper>() {
         mPagerCallback = parentFragment as PagerCallback
 
         App.appComponent.inject(this)
-        mRxBus.get()
+        mEventBus.get()
             .ofType(ThreadTypeChangeEvent::class.java)
             .to(AndroidRxDispose.withObservable(this, FragmentEvent.DESTROY))
             .subscribe {
@@ -67,7 +63,7 @@ class ThreadListPagerFragment : BaseRecyclerViewFragment<ThreadsWrapper>() {
                     startSwipeRefresh()
                 }
             }
-        mRxBus.get()
+        mEventBus.get()
             .ofType(PostDisableStickyChangeEvent::class.java)
             .to(AndroidRxDispose.withObservable(this, FragmentEvent.DESTROY))
             .subscribe {
@@ -104,7 +100,7 @@ class ThreadListPagerFragment : BaseRecyclerViewFragment<ThreadsWrapper>() {
     override suspend fun getSource(loading: Int): Flow<Resource<ThreadsWrapper>>? {
         val source = apiCacheProvider.getThreadsWrapper(
             mForumId, mTypeId, mPageNum,
-            CacheParam(isForceLoading, listOf(mForumId, mTypeId, mPageNum))
+            CacheParam(isForceLoading)
         )
         if (mGeneralPreferencesManager.isPostDisableSticky) {
             return source.map {

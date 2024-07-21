@@ -6,10 +6,11 @@ import androidx.appcompat.widget.PopupMenu
 import androidx.databinding.Observable
 import androidx.databinding.ObservableField
 import androidx.databinding.ObservableInt
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.LifecycleOwner
 import com.github.ykrank.androidtools.util.ContextUtils
 import com.github.ykrank.androidtools.util.L
-import com.github.ykrank.androidtools.widget.RxBus
+import com.github.ykrank.androidtools.widget.EventBus
 import me.ykrank.s1next.R
 import me.ykrank.s1next.data.User
 import me.ykrank.s1next.data.api.Api
@@ -30,7 +31,7 @@ import me.ykrank.s1next.widget.glide.AvatarUrlsCache
 
 class PostViewModel(
     val lifecycleOwner: LifecycleOwner,
-    private val rxBus: RxBus,
+    private val eventBus: EventBus,
     private val user: User
 ) {
 
@@ -62,7 +63,7 @@ class PostViewModel(
                 //Clear avatar false cache
                 AvatarUrlsCache.clearUserAvatarCache(authorId)
                 //个人主页
-                UserHomeActivity.start(v.context as androidx.fragment.app.FragmentActivity, authorId, authorName, v)
+                UserHomeActivity.start(v.context as FragmentActivity, authorId, authorName, v)
             }
         }
     }
@@ -80,7 +81,7 @@ class PostViewModel(
                         val authorName = postData.authorName
                         if (authorName != null) {
                             if (menuitem.title == v.context.getString(R.string.menu_blacklist_remove)) {
-                                BlacklistMenuAction.removeBlacklist(lifecycleOwner, rxBus, authorIdInt, authorName)
+                                BlacklistMenuAction.removeBlacklist(lifecycleOwner, eventBus, authorIdInt, authorName)
                             } else {
                                 val context = ContextUtils.getBaseContext(v.context)
                                 if (context is androidx.fragment.app.FragmentActivity) {
@@ -140,7 +141,7 @@ class PostViewModel(
         val postId = post.get()?.id?.toString()
         val count = post.get()?.number
         if (postId != null && count != null) {
-            rxBus.post(QuoteEvent(postId, count))
+            eventBus.postDefault(QuoteEvent(postId, count))
         }
     }
 
@@ -148,7 +149,7 @@ class PostViewModel(
         val tid = thread.get()?.id
         val pid = post.get()?.id?.toString()
         if (tid != null && pid != null) {
-            rxBus.post(RateEvent(tid, pid))
+            eventBus.postDefault(RateEvent(tid, pid))
         }
     }
 
@@ -156,7 +157,7 @@ class PostViewModel(
         val tid = thread.get()?.id
         val pid = post.get()?.id?.toString()
         if (tid != null && pid != null) {
-            rxBus.post(ReportEvent(tid, pid, pageNum.get()))
+            eventBus.postDefault(ReportEvent(tid, pid, pageNum.get()))
         }
     }
 
@@ -164,7 +165,7 @@ class PostViewModel(
         val p = post.get()
         val t = thread.get()
         if (p != null && t != null) {
-            rxBus.post(EditPostEvent(p, t))
+            eventBus.postDefault(EditPostEvent(p, t))
         }
     }
 
@@ -181,7 +182,7 @@ class PostViewModel(
         val tid = thread.get()?.id
         val vo = vote.get()
         if (tid != null && vo != null) {
-            rxBus.post(VotePostEvent(tid, vo))
+            eventBus.postDefault(VotePostEvent(tid, vo))
         }
     }
 
