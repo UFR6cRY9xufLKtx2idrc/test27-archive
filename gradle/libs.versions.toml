@@ -12,7 +12,7 @@ bugly_nativecrashreport = "3.9.2"
 dagger = "2.51.1"
 flipperNoop = "0.250.0"
 glide = "4.16.0"
-guava = "33.2.0-android"
+guava = "33.2.1-android"
 # https://github.com/FasterXML/jackson-databind/issues/3702
 # jackson 2.14 does not work on Android API < 26
 jackson = "2.17.1"
