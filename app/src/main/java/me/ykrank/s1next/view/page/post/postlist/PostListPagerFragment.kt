@@ -15,7 +15,6 @@ import com.bigkoo.quicksidebar.listener.OnQuickSideBarTouchListener
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.github.ykrank.androidautodispose.AndroidRxDispose
 import com.github.ykrank.androidlifecycle.event.FragmentEvent
-import com.github.ykrank.androidtools.data.CacheParam
 import com.github.ykrank.androidtools.data.Resource
 import com.github.ykrank.androidtools.ui.internal.LoadingViewModelBindingDelegate
 import com.github.ykrank.androidtools.util.L
@@ -92,6 +91,9 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
     private var mPagerCallback: PagerCallback? = null
 
     private var refreshAfterBlacklistChangeDisposable: Disposable? = null
+
+    val pageNum:Int
+        get() = mPageNum
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
@@ -278,8 +280,8 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
 
     override suspend fun getSource(loading: Int): Flow<Resource<PostsWrapper>> {
         return apiCacheProvider.getPostsWrapper(
-            mThreadId, mPageNum, mAuthorId,
-            CacheParam(isForceLoading)
+            mThreadId?:"", mPageNum, mAuthorId,
+            ignoreCache = isForceLoading,
         ) { pid, rates ->
             mRecyclerAdapter.dataSet.filterIsInstance<Post>()
                 .forEachIndexed { index, post ->
@@ -451,7 +453,7 @@ class PostListPagerFragment : BaseRecyclerViewFragment<PostsWrapper>(),
     }
 
     companion object {
-
+        val TAG = PostListPagerFragment::class.simpleName
         private const val ARG_THREAD_ID = "thread_id"
         private const val ARG_PAGE_NUM = "page_num"
         private const val ARG_AUTHOR_ID = "author_id"

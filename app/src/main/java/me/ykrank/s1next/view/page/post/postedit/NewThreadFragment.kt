@@ -19,7 +19,7 @@ import me.ykrank.s1next.App
 import me.ykrank.s1next.R
 import me.ykrank.s1next.data.api.S1Service
 import me.ykrank.s1next.data.api.model.ThreadType
-import me.ykrank.s1next.data.cache.model.NewThreadCacheModel
+import me.ykrank.s1next.data.cache.exmodel.NewThreadCacheModel
 import me.ykrank.s1next.databinding.FragmentNewThreadBinding
 import me.ykrank.s1next.view.adapter.SimpleSpinnerAdapter
 import me.ykrank.s1next.view.dialog.requestdialog.NewThreadRequestDialogFragment
@@ -167,7 +167,7 @@ class NewThreadFragment : BasePostEditFragment() {
     }
 
     companion object {
-        val TAG: String = NewThreadFragment::class.java.name
+        val TAG: String = NewThreadFragment::class.java.simpleName
 
         private const val ARG_FORUM_ID = "forum_id"
 

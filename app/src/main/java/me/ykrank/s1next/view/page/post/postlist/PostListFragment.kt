@@ -392,8 +392,8 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
                 return true
             }
 
-            R.id.menu_prefetch_all_posts -> {
-                ThreadPrefetchDialogFragment.newInstance(mThreadId)
+            R.id.menu_prefetch_after_posts -> {
+                ThreadPrefetchDialogFragment.newInstance(mThreadId, curPostPageFragment?.pageNum)
                     .show(childFragmentManager, LoadBlackListFromWebDialogFragment.TAG)
                 return true
             }
@@ -583,7 +583,7 @@ class PostListFragment : BaseViewPagerFragment(), PostListPagerFragment.PagerCal
     }
 
     companion object {
-        val TAG = PostListFragment::class.java.name
+        val TAG = PostListFragment::class.java.simpleName
 
         const val Type_Thread = 0
         const val Type_Thread_Link = 1

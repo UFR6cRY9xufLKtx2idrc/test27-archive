@@ -30,67 +30,102 @@ import me.ykrank.s1next.data.api.model.wrapper.ForumGroupsWrapper
 import me.ykrank.s1next.data.api.model.wrapper.PostsWrapper
 import me.ykrank.s1next.data.api.model.wrapper.RatePostsWrapper
 import me.ykrank.s1next.data.api.model.wrapper.ThreadsWrapper
-import me.ykrank.s1next.data.cache.CacheBiz
-import me.ykrank.s1next.data.cache.model.BaseCache
+import me.ykrank.s1next.data.cache.biz.CacheBiz
+import me.ykrank.s1next.data.cache.biz.CacheGroupBiz
+import me.ykrank.s1next.data.cache.dbmodel.Cache
+import me.ykrank.s1next.data.cache.exmodel.BaseCache
 import me.ykrank.s1next.data.pref.DownloadPreferencesManager
 
 class S1ApiCacheProvider(
     private val downloadPerf: DownloadPreferencesManager,
     private val s1Service: S1Service,
     private val cacheBiz: CacheBiz,
+    private val cacheGroupBiz: CacheGroupBiz,
     private val user: User,
     private val jsonMapper: ObjectMapper,
 ) : ApiCacheProvider {
-
-    private val apiCacheFlow = ApiCacheFlow(downloadPerf, cacheBiz, user, jsonMapper)
     private val ratesCache = LruCache<String, BaseCache<List<Rate>>>(256)
 
     override suspend fun getForumGroupsWrapper(param: CacheParam?): Flow<Resource<ForumGroupsWrapper>> {
-        return apiCacheFlow.getFlow(
-            ApiCacheConstants.CacheType.ForumGroups,
+        val cacheType = ApiCacheConstants.CacheType.ForumGroups
+        // user为空时，忽略user取最新缓存，兼容完全断网时重新打开app的情况
+        val apiCacheFlow = object : ApiCacheFlow<ForumGroupsWrapper>(
+            downloadPerf, cacheBiz, user, jsonMapper,
+            cacheType,
             param,
             ForumGroupsWrapper::class.java,
             api = {
                 s1Service.getForumGroupsWrapper()
             },
-            setValidator = {
+            interceptor = ApiCacheValidatorCache {
                 !it.data?.forumList.isNullOrEmpty()
             },
             keys = emptyList()
-        )
+        ) {
+            override fun getCache(): Cache? {
+                if (!user.isLogged) {
+                    return cacheBiz.getTextZipNewest(listOf(cacheType.type))
+                }
+                return super.getCache()
+            }
+        }
+        return apiCacheFlow.getFlow()
     }
 
     override suspend fun getThreadsWrapper(
-        forumId: String?,
+        forumId: String,
         typeId: String?,
         page: Int,
         param: CacheParam?
     ): Flow<Resource<ThreadsWrapper>> {
-        return apiCacheFlow.getFlow(
-            ApiCacheConstants.CacheType.Threads,
+        val isLogged = user.isLogged
+        val cacheType = ApiCacheConstants.CacheType.Threads
+        val cacheKeys = listOf(forumId, typeId, page)
+        val interceptor = object : ApiCacheValidatorCache<ThreadsWrapper>({
+            !it.data?.threadList.isNullOrEmpty()
+        }) {
+            override fun interceptSaveKey(key: String, data: ThreadsWrapper): String {
+                // 用户信息未初始化时，从结果中获取uid
+                if (!isLogged) {
+                    val uid = data.data?.uid ?: user.uid
+                    return ApiCacheFlow.getKey(uid, cacheType, cacheKeys)
+                }
+                return super.interceptSaveKey(key, data)
+            }
+        }
+        val apiCacheFlow = ApiCacheFlow(
+            downloadPerf, cacheBiz, user, jsonMapper,
+            cacheType,
             param,
             ThreadsWrapper::class.java,
             api = {
                 s1Service.getThreadsWrapper(forumId, typeId, page)
             },
-            setValidator = {
-                !it.data?.threadList.isNullOrEmpty()
-            },
-            keys = listOf(forumId, typeId, page)
+            interceptor = interceptor,
+            keys = cacheKeys
         )
+        return apiCacheFlow.getFlow()
     }
 
     @OptIn(FlowPreview::class)
     override suspend fun getPostsWrapper(
-        threadId: String?,
+        threadId: String,
         page: Int,
         authorId: String?,
-        param: CacheParam?,
+        ignoreCache: Boolean,
         onRateUpdate: ((pid: Int, rate: List<Rate>) -> Unit)?,
     ): Flow<Resource<PostsWrapper>> {
+        val isLogged = user.isLogged
+        val cacheType = ApiCacheConstants.CacheType.Posts
+        val groupPage = page.toString()
+
         val cacheKeys = listOf(threadId, page)
+        val cacheExtraGroups = listOf(threadId, groupPage)
+        val cacheGroups = listOf(cacheType.type) + cacheExtraGroups
+        val groupGroups = listOf(cacheType.type, threadId)
+
         // 不过滤回帖人时才走缓存
-        val userCache = authorId.isNullOrEmpty()
+        val cacheValid = authorId.isNullOrEmpty()
         val loadTime = LoadTime()
         val ratePostFlow = flow {
             val rates = runCatching {
@@ -102,39 +137,80 @@ class S1ApiCacheProvider(
             }
             emit(rates)
         }.flowOn(Dispatchers.IO)
-
-        fun saveCache(postWrapper: PostsWrapper) {
-            if (userCache) {
-                cacheBiz.saveZipAsync(
-                    apiCacheFlow.getKey(
-                        ApiCacheConstants.CacheType.Posts,
-                        cacheKeys
-                    ),
-                    postWrapper,
-                    maxSize = downloadPerf.totalDataCacheSize
-                )
+        var netPostsWrapper: PostsWrapper? = null
+        val interceptor = object : ApiCacheInterceptor<PostsWrapper> {
+            override fun interceptQueryCache(cache: PostsWrapper): PostsWrapper {
+                // 从缓存获取时，将帖数更新为最新
+                val cacheGroup = cacheGroupBiz.query(groupGroups)
+                cacheGroup?.extra?.apply {
+                    if (this.isNotBlank()) {
+                        cache.data?.postListInfo?.replies = this
+                    }
+                }
+                return cache
             }
+
+            override fun interceptSaveCache(cache: PostsWrapper): PostsWrapper? {
+                // 需要后处理才能更新缓存
+                return null
+            }
+
+            override fun interceptSaveKey(key: String, data: PostsWrapper): String {
+                // 用户信息未初始化时，从结果中获取uid
+                if (!isLogged) {
+                    val uid = data.data?.uid ?: user.uid
+                    return ApiCacheFlow.getKey(uid, cacheType, cacheKeys)
+                }
+                return super.interceptSaveKey(key, data)
+            }
+
+            override fun shouldNetDataFallback(data: PostsWrapper): Boolean {
+                return false
+            }
+
         }
 
-        var netPostsWrapper: PostsWrapper? = null
-        return apiCacheFlow.getFlow(
-            ApiCacheConstants.CacheType.Posts,
-            param,
+        val apiCacheFlow = ApiCacheFlow(
+            downloadPerf, cacheBiz, user, jsonMapper,
+            cacheType,
+            CacheParam(ignoreCache = ignoreCache || !cacheValid),
             PostsWrapper::class.java,
             loadTime = loadTime,
             printTime = false,
             api = {
                 s1Service.getPostsWrapper(threadId, page, authorId)
             },
-            setValidator = {
-                // 需要后处理才能更新缓存
-                false
-            },
-            getValidator = {
-                userCache
-            },
+            interceptor = interceptor,
             keys = cacheKeys,
+            groupsExtra = cacheExtraGroups
         )
+
+        fun saveCache(postWrapper: PostsWrapper) {
+            if (cacheValid) {
+                cacheBiz.saveZipAsync(
+                    apiCacheFlow.getKey(
+                        cacheType,
+                        cacheKeys
+                    ),
+                    user.uid?.toIntOrNull(),
+                    postWrapper,
+                    maxSize = downloadPerf.totalDataCacheSize,
+                    groups = cacheGroups
+                )
+                // 保存title时不保存page
+                postWrapper.data?.postListInfo?.let { thread ->
+                    thread.title?.apply {
+                        cacheGroupBiz.saveTitleAsync(
+                            this,
+                            groups = groupGroups,
+                            extras = listOf(thread.reliesCount.toString())
+                        )
+                    }
+                }
+            }
+        }
+
+        return apiCacheFlow.getFlow()
             .combine(ratePostFlow) { it, ratePostWrapper ->
                 if (it.source.isCloud()) {
                     withContext(Dispatchers.IO) {
@@ -169,7 +245,7 @@ class S1ApiCacheProvider(
                                 }
                             }
                         }
-                        if (!hasError && postWrapper != null && userCache) {
+                        if (!hasError && postWrapper != null && cacheValid) {
                             withContext(Dispatchers.Default) {
                                 loadTime.run(ApiCacheConstants.Time.TIME_SAVE_CACHE) {
                                     saveCache(postWrapper)
@@ -219,7 +295,7 @@ class S1ApiCacheProvider(
                                     pid
                                 }.debounce(CACHE_RATE_SAVE_DEBOUNCE)
                                 .collect {
-                                    if (userCache) {
+                                    if (cacheValid) {
                                         withContext(Dispatchers.Default) {
                                             loadTime.run(ApiCacheConstants.Time.TIME_UPDATE_CACHE + it) {
                                                 saveCache(postsWrapper)
@@ -244,7 +320,7 @@ class S1ApiCacheProvider(
         return "u${user.uid ?: ""}#${threadId ?: ""}#$pid"
     }
 
-    override suspend fun getPostRates(threadId: String?, postId: Int): Resource<List<Rate>> {
+    override suspend fun getPostRates(threadId: String, postId: Int): Resource<List<Rate>> {
         val rate = runCatching {
             s1Service.getRates(threadId, postId.toString()).let {
                 Rate.fromHtml(it)

@@ -19,7 +19,7 @@ val httpDnsSecret = properties.getProperty("httpDnsSecret") ?: "\"\""
 
 val appVersionCode = 88
 val appVersionName = "3.1"
-val appVersionExtra = ".1"
+val appVersionSuffix = "3"
 
 android {
     namespace = "me.ykrank.s1next"
@@ -30,7 +30,7 @@ android {
         minSdk = 26
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = appVersionCode
-        versionName = "${appVersionName}.${appVersionCode}${appVersionExtra}"
+        versionName = "${appVersionName}.${appVersionCode}.${appVersionSuffix}"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -145,6 +145,7 @@ dependencies {
     implementation(libs.androidx.transition)
 
     implementation(libs.okhttp.urlconnection)
+    implementation(libs.okhttp.coroutines)
     implementation(libs.retrofit2)
     implementation(libs.retrofit2.adapter.rxjava2)
     implementation(libs.retrofit2.converter.jackson)
