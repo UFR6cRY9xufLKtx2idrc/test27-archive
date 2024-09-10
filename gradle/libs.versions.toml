@@ -53,6 +53,8 @@ largeimageview = "1.1.0"
 compileSdk = "34"
 targetSdk = "34"
 agp = "8.6.0"
+avif = "1.8.0"
+jxl = "2.3.0"
 
 [libraries]
 adapterdelegates3 = { module = "com.hannesdorfmann:adapterdelegates3", version.ref = "adapterdelegates3" }
@@ -115,6 +117,8 @@ rxjava = { module = "io.reactivex.rxjava2:rxjava", version.ref = "rxjava" }
 rxkotlin = { module = "io.reactivex.rxjava2:rxkotlin", version.ref = "rxkotlin" }
 soloader = { module = "com.facebook.soloader:soloader", version.ref = "soloader" }
 largeimageview = { module = "com.shizhefei:LargeImageView", version.ref = "largeimageview" }
+avif-integration = { group = "io.github.awxkee", name = "avif-coder-glide", version = "avif" }
+jxl-integration = { group = "io.github.awxkee", name = "jxl-coder-glide", version = "jxl" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
