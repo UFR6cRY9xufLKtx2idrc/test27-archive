@@ -1,6 +1,6 @@
 [versions]
 adapterdelegates3 = "3.1.0"
-alicloudAndroidHttpdns = "2.4.2"
+alicloudAndroidHttpdns = "2.4.3"
 androidautodispose = "0.4.0"
 activity = "1.9.2"
 cardview = "1.0.0"
