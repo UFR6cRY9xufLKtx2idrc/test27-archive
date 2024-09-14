@@ -10,7 +10,7 @@ bugly_crashreport = "4.1.9.3"
 bugly_crashreport_upgrade = "1.6.1"
 bugly_nativecrashreport = "3.9.2"
 dagger = "2.52"
-flipperNoop = "0.265.0"
+flipperNoop = "0.266.0"
 glide = "4.16.0"
 guava = "33.3.0-android"
 # https://github.com/FasterXML/jackson-databind/issues/3702
