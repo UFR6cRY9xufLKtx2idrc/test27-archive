@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Point
 import android.graphics.Typeface
-import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.text.SpannableStringBuilder
@@ -21,12 +20,12 @@ import android.view.inputmethod.EditorInfo
 import android.widget.ImageButton
 import android.widget.SearchView
 import android.widget.TextView
-import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
 import androidx.core.app.ActivityOptionsCompat
 import androidx.core.view.ViewCompat
 import androidx.databinding.DataBindingUtil
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.transition.TransitionManager
 import com.github.ykrank.androidautodispose.AndroidRxDispose
 import com.github.ykrank.androidlifecycle.event.ActivityEvent
@@ -34,6 +33,7 @@ import com.github.ykrank.androidtools.util.ImeUtils
 import com.github.ykrank.androidtools.util.L
 import com.github.ykrank.androidtools.util.RxJavaUtil
 import com.github.ykrank.androidtools.util.TransitionUtils
+import kotlinx.coroutines.launch
 import me.ykrank.s1next.App
 import me.ykrank.s1next.R
 import me.ykrank.s1next.data.api.ApiFlatTransformer
@@ -128,60 +128,52 @@ class SearchActivity : BaseActivity() {
     }
 
     private fun setupWindowAnimations() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val enterTransition =
-                TransitionInflater.from(this).inflateTransition(R.transition.search_enter)
-            window.enterTransition = enterTransition
+        val enterTransition =
+            TransitionInflater.from(this).inflateTransition(R.transition.search_enter)
+        window.enterTransition = enterTransition
 
-            val returnTransition =
-                TransitionInflater.from(this).inflateTransition(R.transition.search_return)
-            window.returnTransition = returnTransition
+        val returnTransition =
+            TransitionInflater.from(this).inflateTransition(R.transition.search_return)
+        window.returnTransition = returnTransition
 
-            val enterShareTransition =
-                TransitionInflater.from(this).inflateTransition(R.transition.search_shared_enter)
-            window.sharedElementEnterTransition = enterShareTransition
+        val enterShareTransition =
+            TransitionInflater.from(this).inflateTransition(R.transition.search_shared_enter)
+        window.sharedElementEnterTransition = enterShareTransition
 
-            val returnShareTransition =
-                TransitionInflater.from(this).inflateTransition(R.transition.search_shared_return)
-            window.sharedElementReturnTransition = returnShareTransition
-        }
+        val returnShareTransition =
+            TransitionInflater.from(this).inflateTransition(R.transition.search_shared_return)
+        window.sharedElementReturnTransition = returnShareTransition
     }
 
     private fun setupTransitions() {
         // grab the position that the search icon transitions in *from*
         // & use it to configure the return transition
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            setEnterSharedElementCallback(object : SharedElementCallback() {
-                @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
-                override fun onSharedElementStart(
-                    sharedElementNames: List<String>,
-                    sharedElements: List<View>?,
-                    sharedElementSnapshots: List<View>
-                ) {
-                    if (sharedElements != null && !sharedElements.isEmpty()) {
-                        val searchIcon = sharedElements[0]
-                        if (searchIcon.id != R.id.searchback) return
-                        val centerX = (searchIcon.left + searchIcon.right) / 2
-                        val hideResults = TransitionUtils.findTransition(
-                            window.returnTransition as TransitionSet,
-                            CircularReveal::class.java, R.id.results_container
-                        ) as CircularReveal?
-                        hideResults?.setCenter(Point(centerX, 0))
-                    }
+        setEnterSharedElementCallback(object : SharedElementCallback() {
+            override fun onSharedElementStart(
+                sharedElementNames: List<String>,
+                sharedElements: List<View>?,
+                sharedElementSnapshots: List<View>
+            ) {
+                if (!sharedElements.isNullOrEmpty()) {
+                    val searchIcon = sharedElements[0]
+                    if (searchIcon.id != R.id.searchback) return
+                    val centerX = (searchIcon.left + searchIcon.right) / 2
+                    val hideResults = TransitionUtils.findTransition(
+                        window.returnTransition as TransitionSet,
+                        CircularReveal::class.java, R.id.results_container
+                    ) as CircularReveal?
+                    hideResults?.setCenter(Point(centerX, 0))
+                }
+            }
+        })
+        // focus the search view once the transition finishes
+        window.enterTransition.addListener(
+            object : TransitionUtils.TransitionListenerAdapter() {
+                override fun onTransitionEnd(transition: Transition) {
+                    searchView.requestFocus()
+                    ImeUtils.showIme(searchView)
                 }
             })
-            // focus the search view once the transition finishes
-            window.enterTransition.addListener(
-                object : TransitionUtils.TransitionListenerAdapter() {
-                    override fun onTransitionEnd(transition: Transition) {
-                        searchView.requestFocus()
-                        ImeUtils.showIme(searchView)
-                    }
-                })
-        } else {
-            searchView.requestFocus()
-            ImeUtils.showIme(searchView)
-        }
     }
 
     private fun compatBackIcon() {
@@ -193,13 +185,8 @@ class SearchActivity : BaseActivity() {
         // hint, inputType & ime options seem to be ignored from XML! Set in code
         searchView.queryHint = getString(R.string.search_hint)
         searchView.inputType = InputType.TYPE_TEXT_FLAG_CAP_WORDS
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-            searchView.imeOptions = searchView.imeOptions or EditorInfo.IME_ACTION_SEARCH or
-                    EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
-        } else {
-            searchView.imeOptions = EditorInfo.IME_ACTION_SEARCH or
-                    EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
-        }
+        searchView.imeOptions = searchView.imeOptions or EditorInfo.IME_ACTION_SEARCH or
+                EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
         searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String?): Boolean {
                 L.leaveMsg("onQueryTextSubmit:$query")
@@ -231,7 +218,7 @@ class SearchActivity : BaseActivity() {
 
     private fun setResults(data: List<SearchResult>?, errorMsg: String?) {
         L.leaveMsg("setResults error:$errorMsg")
-        if (data != null && data.isNotEmpty()) {
+        if (!data.isNullOrEmpty()) {
             if (recyclerView.visibility != View.VISIBLE) {
                 TransitionManager.beginDelayedTransition(
                     binding.resultsContainer,
@@ -299,7 +286,9 @@ class SearchActivity : BaseActivity() {
                 .compose(RxJavaUtil.iOSingleTransformer())
                 .to(AndroidRxDispose.withSingle(this, ActivityEvent.DESTROY))
                 .subscribe({ setResults(it.userSearchResults, it.errorMsg) }, {
-                    setResults(null, ErrorUtil.parse(this, it))
+                    lifecycleScope.launch {
+                        setResults(null, ErrorUtil.parse(this@SearchActivity, it))
+                    }
                 })
         } else {
             ApiFlatTransformer.flatMappedWithAuthenticityToken(
@@ -311,7 +300,9 @@ class SearchActivity : BaseActivity() {
                 .compose(RxJavaUtil.iOSingleTransformer())
                 .to(AndroidRxDispose.withSingle(this, ActivityEvent.DESTROY))
                 .subscribe({ setResults(it.forumSearchResults, null) }, {
-                    setResults(null, ErrorUtil.parse(this, it))
+                    lifecycleScope.launch {
+                        setResults(null, ErrorUtil.parse(this@SearchActivity, it))
+                    }
                 })
         }
     }
@@ -319,11 +310,7 @@ class SearchActivity : BaseActivity() {
     private fun dismiss() {
         // clear the background else the touch ripple moves with the translation which looks bad
         ViewCompat.setBackground(searchBack, null)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            finishAfterTransition()
-        } else {
-            finish()
-        }
+        finishAfterTransition()
     }
 
     companion object {
