@@ -11,7 +11,6 @@ import androidx.lifecycle.lifecycleScope
 import com.github.ykrank.androidtools.data.CacheParam
 import com.github.ykrank.androidtools.data.Resource
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 import me.ykrank.s1next.App
 import me.ykrank.s1next.R
@@ -53,8 +52,7 @@ class ForumFragment : BaseRecyclerViewFragment<ForumGroupsWrapper>(),
         recyclerView.adapter = mRecyclerAdapter
 
         lifecycleScope.launch {
-            mEventBus.getDefaultFlow()
-                .filterIsInstance(LoginEvent::class)
+            mEventBus.getClsFlow<LoginEvent>()
                 .collect {
                     forceSwipeRefresh()
                 }
@@ -90,7 +88,7 @@ class ForumFragment : BaseRecyclerViewFragment<ForumGroupsWrapper>(),
     }
 
     override suspend fun getSource(loading: Int): Flow<Resource<ForumGroupsWrapper>> {
-        return apiCacheProvider.getForumGroupsWrapper(CacheParam(isForceLoading))
+        return apiCacheProvider.getForumGroupsWrapper(CacheParam(isIgnoreCache))
     }
 
     override fun onNext(data: ForumGroupsWrapper) {

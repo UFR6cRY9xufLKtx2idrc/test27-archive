@@ -15,12 +15,19 @@ Resource<T>(
     class Error<T>(source: Source, throwable: Throwable, data: T? = null) :
         Resource<T>(source, data, throwable)
 
+    val isSuccess: Boolean
+        get() = this is Success
+
+    val isError: Boolean
+        get() = this is Error
+
     companion object {
         fun <T> fromResult(source: Source, result: Result<T>): Resource<T> {
-            if (result.isSuccess) {
-                return Success(source, result.getOrThrow())
-            }
-            return Error(source, result.exceptionOrNull()!!, result.getOrNull())
+            return result.fold({
+                Success(source, it)
+            }, {
+                Error(source, it)
+            })
         }
     }
 }
